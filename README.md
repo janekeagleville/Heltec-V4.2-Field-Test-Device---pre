@@ -196,7 +196,7 @@ c++ -std=c++11 -I include test/protocol_test.cpp -o protocol-test
 - https://github.com/Bodmer/TFT_eSPI
 
 ## Język interfejsu
-Interfejs CYD i aplikacji iPhone jest po angielsku (READABLE / MARGINAL / UNREADABLE, HOPS, NOISE, CH UTIL, AIR TX itd.). Komentarze w kodzie i ten README są po polsku.
+Interfejs CYD i aplikacj jest po angielsku (READABLE / MARGINAL / UNREADABLE, HOPS, NOISE, CH UTIL, AIR TX itd.). Komentarze w kodzie i ten README są po polsku.
 
 
 
