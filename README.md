@@ -207,9 +207,11 @@ GPIO4 (złącze J3, pin 15), UART TX	IO35
 GPIO6 (złącze J3, pin 17), UART RX	IO27
 GND (złącze J3, pin 1)	GND
 
+Heltec V4.2	Złącze / pin	Funkcja	CYD 2.8	Złącze CYD
 GPIO4	J3, pin 15	UART TX	IO35	P3 (RX)
 GPIO6	J3, pin 17	UART RX	IO27	CN1 (TX)
-GND	J3, pin 1	Masa wspólna	GND	dowolny GND<img width="457" height="46" alt="image" src="https://github.com/user-attachments/assets/d0dd3496-a665-4529-b3bd-bfe8b5f34ad1" />
+GND	J3, pin 1	Masa wspólna	GND	dowolny GND<img width="457" height="61" alt="image" src="https://github.com/user-attachments/assets/6168b006-5526-4169-a788-f695c8414c40" />
+
 
 
 Komenda do ustawienia modułu Serial:
