@@ -101,7 +101,9 @@ a XPT2046 obsługiwany programowo (MISO39/MOSI32/CLK25/CS33).
 ## Pulpit (ekran startowy)
 Sześć kafelków ze statusem węzła, na podstawie danych z Trackera przez UART: BATTERY (% i napięcie, USB = zasilanie zewnętrzne),
 NODES (słyszane / aktywne w 15 min / znane), RADIO (preset, częstotliwość środkowa, SF i BW), CHANNEL (channel utilization, Tx airtime, nazwa kanału),
-CHAT (ostatnia odebrana wiadomość tekstowa i licznik), DEVICE (ID, czas pracy, baud, ramki).
+CHAT (lista kanałów z liczbą nowych wiadomości, patrz niżej), DEVICE (ID, czas pracy, baud, ramki).
+
+**Czat.** Kafelek CHAT pokazuje kanały skonfigurowane na nodzie (numer, nazwa, liczba nieprzeczytanych; DM = wiadomości wysłane bezpośrednio do noda) oraz łączną liczbę nowych w rogu. Dotknięcie wiersza kanału otwiera okno z jego wiadomościami: najnowsze na górze, 4 na stronie, nowe oznaczone pomarańczową kropką, nadawca i czas od odbioru. Prawy przycisk (OLDER) lub dotknięcie dolnej/górnej połowy ekranu przewija strony, dotknięcie nagłówka kafelka otwiera kanał z najnowszą wiadomością, DASHBOARD wraca. Wiadomości są tylko w pamięci RAM (ostatnie 40, po restarcie znikają), tekst jest przycinany do 100 znaków, polskie litery wyświetlają się bez ogonków.
 Klawisze: NODES ↔ dashboard (lewy), LOG (środek, na pulpicie zapisuje cały ruch), DASHBOARD / CAL (prawy; na pulpicie to kalibracja dotyku).
 Bateria i zajętość kanału pojawiają się po pierwszej telemetrii Trackera (zwykle do kilkunastu minut; interwał ustawia się w module Telemetry).
 Częstotliwość wyliczana jest dla regionów US, EU433, EU868 i ANZ; dla innych pokazana jest nazwa regionu.
@@ -118,7 +120,7 @@ Skala ok. 1,7 km/piksel — to mapa poglądowa, nie nawigacyjna.
 ## Widmo i szum (ekran „NOISE”)
 Wejście: dotknij kafelka RADIO lub CHANNEL na pulpicie. Prawy klawisz (lub dotknięcie wykresu) zmienia przedział czasu (TIME 1m / 10m / 1h), lewy wraca na pulpit.
 Meshtastic nie udostępnia pomiaru radia, więc ekran pokazuje **estymaty z odebranych pakietów**, a nie prawdziwe widmo pasma:
-- NOISE = RSSI − SNR odebranego pakietu (dBm); FLOOR = 10. percentyl szumu w oknie; wykres: turkus = szum, bursztyn = RSSI sygnału.
+- NOISE = RSSI − SNR odebranego pakietu (dBm); FLOOR = 10. percentyl szumu w oknie; wykres: turkus = szum (przerywana linia = FLOOR, białe kropki = odczyty), bursztyn = RSSI sygnału. Szum da się oszacować tylko ze słabszych pakietów: przy bardzo silnym sygnale (np. węzeł obok, RSSI około −45 dBm) SNR się nasyca, wynik RSSI − SNR jest nierealny i jest odrzucany (kafelki NOISE i FLOOR pokazują „--”, a na wykresie jest podpowiedź).
 - PKT/MIN = odebrane pakiety z ostatnich 60 s; CH UTIL i AIR TX = zajętość kanału i airtime z telemetrii Trackera, pasek „CHANNEL” to jej historia (próbka co 10 s).
 - Bez ruchu w sieci nie ma pakietów, więc nie ma też szumu. CH UTIL i AIR TX odświeżają się tak rzadko, jak Tracker wysyła telemetrię.
 - Prawdziwe widmo (skan częstotliwości, pomiar szumu w ciszy) wymaga dostępu do układu SX1262, czyli własnego firmware zamiast Meshtastic albo dodatkowego modułu radiowego.
@@ -156,6 +158,8 @@ Współrzędne nie są pobierane z wiadomości odległego nadawcy. Przed wyjści
 że Tracker ma aktualną pozycję z GPS (position_source=2), a gps_age_s jest rozsądne.
 Gdy GPS przestanie dostarczać aktualizacji, zachowywana jest ostatnia pozycja i rośnie jej wiek.
 Napis CACHE oznacza pozycję pobraną podczas początkowego odczytu bazy, o niepewnej aktualności.
+
+**Przyciski GPS.** W nagłówku, na lewo od pola API, jest ikona satelity z przyciskami ON i OFF. Wypełniony przycisk pokazuje tryb GPS zgłoszony przez noda (Config.position.gps_mode). Dotknięcie wysyła do noda lokalną zmianę konfiguracji (pozostałe ustawienia pozycji zostają bez zmian). node zapisuje ją i restartuje się, a po kilkunastu sekundach CYD odczytuje dane od nowa. Pasek GPS pokazuje wtedy „GPS is switched OFF”. Przyciski działają dopiero po połączeniu (API OK) i po odczytaniu konfiguracji pozycji.
 
 ## Granice pomiarów
 

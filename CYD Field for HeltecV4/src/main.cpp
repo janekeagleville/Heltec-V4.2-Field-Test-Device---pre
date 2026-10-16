@@ -21,7 +21,10 @@ struct Node {uint32_t id=0,last=0,count=0;char name[40]={};int rssi=0;float snr=
 Node nodes[MAX_NODES];uint32_t rxBytes=0,frames=0,baudNow=RADIO_BAUD,baudSince=0;uint32_t myId=0,configId=0,lastFrame=0,lastRequest=0,lastHeartbeat=0,lastDraw=0,lastFlush=0;
 bool configured=false,everFrame=false,logging=false,sdReady=false,detail=false;unsigned page=0;int selected=-1;
 File csv;char logPath[64]={};uint32_t logNode=0,clkEpoch=0,clkAt=0,uiMsgUntil=0;const char* uiMsg="";uint32_t written=0,parseErrors=0,logErrors=0;mesh::Position ownPosition;bool ownPositionLive=false;uint32_t positionAt=0;
-mesh::DeviceMetrics dev;uint32_t devAt=0;mesh::LoraCfg lora;mesh::ChannelInfo chans[8];bool home=true,specScr=false,mapScr=false;int mapSel=-1;uint32_t mapSelId=0;unsigned mapPage=0,mapPages=1;const int ZL[]={1,2,3,4,6,8,12},ZN=7,MAP_ZOOM_MAX=12,MAPW_ZOOM_MIN=6;int mapZoom=1;float mapCX=-1,mapCY=-1;unsigned specWin=0;spec::SampleRing specRing;spec::UtilRing utilRing;uint32_t utilAt=0;uint32_t chatCount=0,chatAt=0;char chatFrom[40]={},chatText[64]={};
+mesh::DeviceMetrics dev;uint32_t devAt=0;mesh::LoraCfg lora;mesh::PosCfg posCfg;uint32_t gpsAt=0;mesh::ChannelInfo chans[8];bool home=true,specScr=false,mapScr=false;int mapSel=-1;uint32_t mapSelId=0;unsigned mapPage=0,mapPages=1;const int ZL[]={1,2,3,4,6,8,12},ZN=7,MAP_ZOOM_MAX=12,MAPW_ZOOM_MIN=6;int mapZoom=1;float mapCX=-1,mapCY=-1;unsigned specWin=0;spec::SampleRing specRing;spec::UtilRing utilRing;uint32_t utilAt=0;uint32_t chatCount=0;
+// Wiadomosci tekstowe: pierscien 40 ostatnich w RAM (kanal 0-7, 8 = wiadomosc bezposrednia do tego noda). unread = nieprzeczytane, fresh = podswietlone w oknie czatu.
+struct Msg{uint32_t from=0,at=0;uint8_t ch=0;bool unread=false,fresh=false;char text[100]={};};
+const int MSGN=40;Msg msgs[MSGN];unsigned msgHead=0,msgCnt=0;bool chatScr=false;int chatCh=0;unsigned chatPage=0;
 bool invertScr=false;Preferences prefs;uint16_t calX0=300,calX1=3800,calY0=300,calY1=3800;bool calSwap=true;
 Node* node(uint32_t id){if(!id)return nullptr;for(auto &n:nodes)if(n.id==id)return &n;for(auto &n:nodes)if(!n.id){n=Node{};n.id=id;return &n;}Node* oldest=&nodes[0];for(auto &n:nodes)if(uint32_t(millis()-n.last)>uint32_t(millis()-oldest->last))oldest=&n;*oldest=Node{};oldest->id=id;return oldest;}
 void user(Node* n,const uint8_t* p,size_t len){if(!n)return;mesh::Reader r(p,len);mesh::Field f;char name[40]={},shortName[12]={};while(r.next(f)){if(f.tag==2&&f.wire==2)mesh::copyText(name,sizeof(name),f);if(f.tag==3&&f.wire==2)mesh::copyText(shortName,sizeof(shortName),f);}if(r.ok()){if(name[0])strlcpy(n->name,name,sizeof(n->name));else if(shortName[0])strlcpy(n->name,shortName,sizeof(n->name));}}
@@ -29,6 +32,17 @@ void updatePosition(const uint8_t* p,size_t len,bool live){mesh::Position pos;if
 void nodeInfo(const uint8_t* p,size_t len){mesh::Reader r(p,len);mesh::Field f;uint32_t id=0;const uint8_t *u=nullptr,*pos=nullptr;size_t ul=0,pl=0;mesh::Field dm;while(r.next(f)){if(f.tag==1&&f.wire==0)id=f.value;if(f.tag==2&&f.wire==2){u=f.bytes;ul=f.size;}if(f.tag==3&&f.wire==2){pos=f.bytes;pl=f.size;}if(f.tag==6&&f.wire==2)dm=f;}if(!r.ok()){++parseErrors;return;}Node* n=node(id);if(id==myId&&dm.bytes&&mesh::deviceMetrics(dm.bytes,dm.size,dev))devAt=millis();if(u)user(n,u,ul);if(pos&&n){mesh::Position pp;if(mesh::position(pos,pl,pp)&&pp.valid()&&(pp.lat||pp.lon)){n->lat=pp.lat;n->lon=pp.lon;n->hasPos=true;}}if(id==myId&&pos)updatePosition(pos,pl,configured);}
 void clockSeen(uint32_t e){if(e>1700000000UL&&e<4000000000UL){clkEpoch=e;clkAt=millis();}}
 bool clockNow(uint32_t& e){if(!clkEpoch)return false;e=clkEpoch+(millis()-clkAt)/1000;return true;}
+void chatAdd(uint32_t from,unsigned ch,const uint8_t* p,size_t n){char raw[200]={};size_t k=n<sizeof(raw)-1?n:sizeof(raw)-1;memcpy(raw,p,k);Msg* m;if(msgCnt<MSGN)m=&msgs[(msgHead+msgCnt++)%MSGN];else{m=&msgs[msgHead];msgHead=(msgHead+1)%MSGN;}
+ *m=Msg{};m->from=from;m->at=millis();m->ch=uint8_t(ch);mesh::displayName(raw,m->text,sizeof m->text);if(!m->text[0])strlcpy(m->text,"(no text)",sizeof m->text);bool open=chatScr&&chatCh==int(ch);m->unread=!open;m->fresh=true;++chatCount;if(open)chatPage=0;}
+unsigned unreadN(unsigned ch){unsigned c=0;for(unsigned i=0;i<msgCnt;i++){const Msg& m=msgs[(msgHead+i)%MSGN];if(m.ch==ch&&m.unread)c++;}return c;}
+unsigned chatTotal(unsigned ch){unsigned c=0;for(unsigned i=0;i<msgCnt;i++)if(msgs[(msgHead+i)%MSGN].ch==ch)c++;return c;}
+// Lista kanalow do pokazania: skonfigurowane na nodzie lub z wiadomosciami, plus DM (8) gdy cos przyszlo.
+unsigned chList(unsigned* o){unsigned n=0;for(unsigned c=0;c<9;c++){bool has=chatTotal(c)>0;if(c==8?has:(chans[c].role||chans[c].name[0]||has))o[n++]=c;}return n;}
+String chName(unsigned ch){char b[32]={};if(ch==8)return String("DIRECT MSG");if(chans[ch].name[0])mesh::displayName(chans[ch].name,b,sizeof b);else if(ch==0&&lora.has)strlcpy(b,mesh::presetName(lora.preset),sizeof b);if(!b[0])snprintf(b,sizeof b,"CH %u",ch);return String(b);}
+void openChat(unsigned ch){chatScr=true;home=false;chatCh=int(ch);chatPage=0;for(unsigned i=0;i<msgCnt;i++){Msg& m=msgs[(msgHead+i)%MSGN];if(m.ch==ch)m.unread=false;}uiScreen=-1;}
+void leaveSub(){if(chatScr)for(unsigned i=0;i<msgCnt;i++)msgs[(msgHead+i)%MSGN].fresh=false;specScr=false;mapScr=false;chatScr=false;home=true;}
+// Dotkniecie kafelka CHAT: wiersz kanalu otwiera jego wiadomosci, naglowek kafelka otwiera kanal z najnowsza wiadomoscia.
+void chatTap(int y){unsigned o[9];unsigned n=chList(o);if(!n)return;if(n>5)n=5;int idx=(y-146)/12;if(y<146)idx=-1;else if(idx>=int(n))idx=int(n)-1;unsigned ch=o[idx<0?0:idx];if(idx<0&&msgCnt)ch=msgs[(msgHead+msgCnt-1)%MSGN].ch;openChat(ch);}
 void flash(const char* m,uint32_t ms=3500){uiMsg=m;uiMsgUntil=millis()+ms;}
 void logPacket(const mesh::Packet& p,const Node& n,int32_t rtt){if(!logging||!csv)return;if(logNode&&p.from!=logNode)return;char lat[24]="",lon[24]="",age[24]="",rttText[16]="";if(rtt>=0)snprintf(rttText,sizeof(rttText),"%ld",(long)rtt);bool valid=ownPosition.valid();if(valid){snprintf(lat,sizeof(lat),"%.7f",ownPosition.lat*1e-7);snprintf(lon,sizeof(lon),"%.7f",ownPosition.lon*1e-7);snprintf(age,sizeof(age),"%lu",(unsigned long)((millis()-positionAt)/1000));}
  // GPS coordinates belong to the local Tracker, never the remote sender.
@@ -45,7 +59,7 @@ void packet(const uint8_t* p,size_t len){mesh::Packet m;if(!mesh::packet(p,len,m
    if(e==0){rtt=int32_t(millis()-probe.sentAt);probe.rtt=rtt;probe.rttSum+=rtt;++probe.ok;probe.pending=false;probe.nextAt=max<uint32_t>(probe.sentAt+PROBE_INTERVAL_MS,uint32_t(millis())+2000);dirty=true;}else probeLost();}}
  if(m.port==4&&m.payload)user(node(m.from),m.payload,m.payloadSize);
  if(m.port==3&&m.payload){Node* c=node(m.from);mesh::Position pp;if(c&&mesh::position(m.payload,m.payloadSize,pp)&&pp.valid()&&(pp.lat||pp.lon)){c->lat=pp.lat;c->lon=pp.lon;c->hasPos=true;dirty=true;}}
- if(m.port==1&&m.payload&&m.payloadSize){char raw[64]={};size_t k=m.payloadSize<sizeof(raw)-1?m.payloadSize:sizeof(raw)-1;memcpy(raw,m.payload,k);mesh::displayName(raw,chatText,sizeof(chatText));Node* c=node(m.from);if(c)strlcpy(chatFrom,c->name[0]?c->name:"",sizeof(chatFrom));if(!chatFrom[0])snprintf(chatFrom,sizeof(chatFrom),"!%08lx",(unsigned long)m.from);++chatCount;chatAt=millis();dirty=true;}
+ if(m.port==1&&m.payload&&m.payloadSize&&(m.to==0xFFFFFFFFu||!myId||m.to==myId)){chatAdd(m.from,(m.to!=0xFFFFFFFFu&&myId&&m.to==myId)?8:(m.channel<8?m.channel:0),m.payload,m.payloadSize);dirty=true;}
  // Exclude local transmissions, replay without RSSI and MQTT ingress.
  if(!m.hasRssi||m.mqtt||m.transport>4||!m.from||!isfinite(m.snr)||m.rssi < -200||m.rssi>20)return;
  Node* n=node(m.from);if(!n)return;n->last=millis();n->rssi=m.rssi;n->snr=m.snr;n->mqtt=m.mqtt;
@@ -61,12 +75,15 @@ void fromRadio(const uint8_t* p,size_t len){mesh::Reader r(p,len);mesh::Field f;
  if(f.tag==2&&f.wire==2)packet(f.bytes,f.size);
  if(f.tag==3&&f.wire==2){mesh::Reader info(f.bytes,f.size);mesh::Field a;uint32_t id=0;while(info.next(a))if(a.tag==1&&a.wire==0)id=a.value;if(info.ok()&&id){if(myId&&myId!=id){ownPosition=mesh::Position{};ownPositionLive=false;}myId=id;}}
  if(f.tag==4&&f.wire==2)nodeInfo(f.bytes,f.size);
- if(f.tag==5&&f.wire==2){mesh::LoraCfg c;if(mesh::loraConfig(f.bytes,f.size,c))lora=c;}
+ if(f.tag==5&&f.wire==2){mesh::LoraCfg c;if(mesh::loraConfig(f.bytes,f.size,c))lora=c;mesh::PosCfg pc;if(mesh::posConfig(f.bytes,f.size,pc))posCfg=pc;}
  if(f.tag==10&&f.wire==2){mesh::ChannelInfo c;if(mesh::channel(f.bytes,f.size,c))chans[c.index]=c;}
  if(f.tag==7&&f.wire==0&&f.value==configId)configured=true;
  if(f.tag==8&&f.wire==0&&f.value){configured=false;ownPositionLive=false;ownPosition=mesh::Position{};lastRequest=0;}
 }}
 void sendFrame(const uint8_t* p,size_t len){uint8_t head[]={0x94,0xc3,uint8_t(len>>8),uint8_t(len)};radio.write(head,4);radio.write(p,len);}
+// Wlacza/wylacza GPS w nodzie (Config.position.gps_mode). Wezel zapisuje konfiguracje i restartuje sie; potem odswiezamy dane z Trackera.
+void gpsSet(unsigned mode){if(!configured||!myId){flash("NO LINK");return;}if(!posCfg.has){flash("NO GPS CFG");return;}uint8_t buf[200];uint32_t id=esp_random();if(!id)id=1;size_t n=mesh::buildGpsMode(buf,sizeof buf,myId,id,posCfg,mode);if(!n){flash("GPS CFG ERR");return;}
+ sendFrame(buf,n);posCfg.mode=mode;gpsAt=millis();flash(mode?"GPS ON SENT":"GPS OFF SENT",6000);dirty=true;}
 void probeSend(uint32_t now){uint8_t buf[96];uint32_t id=esp_random();if(!id)id=1;size_t len=mesh::buildProbe(buf,sizeof buf,probe.node,id,uint16_t(probe.seq),PROBE_PORT,PROBE_CHANNEL,PROBE_HOP_LIMIT);if(!len)return;
  sendFrame(buf,len);probe.id=id;probe.sentAt=now;probe.pending=true;++probe.seq;dirty=true;}
 void probeStart(uint32_t nodeId){probe=Probe{};probe.node=nodeId;probe.nextAt=millis();dirty=true;}
@@ -125,16 +142,21 @@ String fitName(const Node& n,int maxW){char buf[48];size_t len=n.name[0]?mesh::d
 void panel(int x,int y,int w,int h){tft.fillRoundRect(x,y,w,h,6,cPANEL);tft.drawRoundRect(x,y,w,h,6,cLINE);}
 void button(int x,int y,int w,const String& s,uint16_t fg,uint16_t bg){tft.fillRoundRect(x,y,w,18,6,bg);tft.drawRoundRect(x,y,w,18,6,fg);txt(s,x+w/2,y+9,2,fg,bg,MC_DATUM);}
 void splash(){tft.setSwapBytes(true);uint16_t row[SPLASH_W];for(unsigned j=0;j<SPLASH_H;j++){for(unsigned i=0;i<SPLASH_W;i++)row[i]=pgm_read_word(splashImg+j*SPLASH_W+i);tft.pushImage(0,j,SPLASH_W,1,row);}}
+// Ikona satelity 16x14: korpus, dwa panele sloneczne z podzialem i antena z kropka (oznacza przyciski GPS).
+void satIcon(int x,int y,uint16_t c){tft.fillRect(x+8,y+6,6,7,c);tft.fillRect(x,y+7,7,5,c);tft.fillRect(x+15,y+7,7,5,c);tft.drawFastVLine(x+3,y+7,5,cHDR);tft.drawFastVLine(x+18,y+7,5,cHDR);tft.drawFastVLine(x+11,y+2,4,c);tft.fillCircle(x+11,y+1,2,c);tft.drawLine(x+14,y+3,x+17,y,c);tft.drawLine(x+15,y+5,x+20,y+1,c);}
+void gpsBtn(int x,int w,const char* l,bool act,uint16_t col){tft.fillRoundRect(x,4,w,15,6,act?col:cHDR);tft.drawRoundRect(x,4,w,15,6,col);txt(l,x+w/2,11,1,act?cBG:col,act?col:cHDR,MC_DATUM);}
 void drawHeader(bool alive){
  tft.fillRect(0,0,320,22,cHDR);tft.drawFastHLine(0,22,320,cLINE);
  tft.drawLine(9,13,15,7,cTURQ);tft.drawLine(15,7,21,14,cTURQ);
  const int nx[]={9,15,21},ny[]={13,7,14};for(int i=0;i<3;i++){tft.fillCircle(nx[i],ny[i],3,cTURQ);tft.fillCircle(nx[i],ny[i],1,cHDR);}
- {const int f=tft.textWidth("LoRaWAN Field Test Kit",2)<=204?2:1,y=f==2?3:7;txt("LoRaWAN",29,y,f,cWHITE,cHDR);int w=tft.textWidth("LoRaWAN",f);txt("Field Test Kit",29+w+(f==2?6:5),y,f,cTURQ,cHDR);}
+ {const int f=tft.textWidth("LoRaWAN Field Test",2)<=204?2:1,y=f==2?3:7;txt("LoRaWAN",29,y,f,cWHITE,cHDR);int w=tft.textWidth("LoRaWAN",f);txt("Field Test",29+w+(f==2?6:5),y,f,cTURQ,cHDR);}
  bool ok=configured&&alive;uint16_t c=ok?cGREEN:cAMBER,bg=ok?cOKBG:cWARNBG;const char* s=configured?(alive?"API OK":"API ?"):"CONNECTING";
- tft.fillRoundRect(240,4,72,15,7,bg);tft.drawRoundRect(240,4,72,15,7,c);tft.fillCircle(249,11,3,c);txt(s,257,7,1,c,bg);}
+ int pw=configured?58:tft.textWidth(s,1)+22,px=312-pw;tft.fillRoundRect(px,4,pw,15,7,bg);tft.drawRoundRect(px,4,pw,15,7,c);tft.fillCircle(px+9,11,3,c);txt(s,px+17,7,1,c,bg);
+ // przyciski GPS noda: aktywny stan wypelniony (wg Config.position.gps_mode)
+ if(configured){satIcon(161,3,cDIM);gpsBtn(187,28,"ON",posCfg.has&&posCfg.mode==1,cGREEN);gpsBtn(218,32,"OFF",posCfg.has&&posCfg.mode==0,cAMBER);}}
 void drawGps(){bool v=ownPosition.valid();bool live=v&&ownPositionLive;uint16_t c=live?cGREEN:cAMBER,bg=live?cOKBG:cWARNBG;
  tft.fillRoundRect(8,26,304,16,8,bg);tft.drawRoundRect(8,26,304,16,8,c);tft.fillCircle(19,34,3,c);
- String s=v?String(ownPosition.lat*1e-7,5)+", "+String(ownPosition.lon*1e-7,5)+"  "+String((millis()-positionAt)/1000)+"s"+(ownPositionLive?"":" CACHE"):String("GPS: no node position");
+ String s=v?String(ownPosition.lat*1e-7,5)+", "+String(ownPosition.lon*1e-7,5)+"  "+String((millis()-positionAt)/1000)+"s"+(ownPositionLive?"":" CACHE"):String(posCfg.has&&posCfg.mode==0?"GPS is switched OFF":posCfg.has&&posCfg.mode==2?"GPS not present":"GPS: no node position");
  txt(s,28,26,2,c,bg);}
 void drawGauge(const Node& n,Quality q){
  const int px=8,py=71,pw=152,ph=79,cx=84,cy=139,ro=53,ri=43;panel(px,py,pw,ph);bool mine=probe.node==n.id;uint16_t dc=!mine||!probe.on?cGREY:probe.pending?cAMBER:((millis()/500)&1?cTURQ:cTRACK);tft.fillCircle(15,80,3,dc);txt("RSSI",22,76,1,cDIM,cPANEL);
@@ -160,9 +182,9 @@ void drawChart(const Node& n){panel(8,182,304,30);txt("RSSI dBm, last "+String(n
  for(unsigned i=0;i<n.used;i++){int x=x1-int((n.used-1-i)*span/(HISTORY-1)),y=ym(n.hist[(start+i)%HISTORY]);if(i)tft.drawLine(px,py,x,y,cTURQ);px=x;py=y;}
  if(n.used)tft.fillCircle(px,py,2,cWHITE);}
 void drawNav(bool detailView){tft.fillRect(0,214,320,26,cHDR);tft.drawFastHLine(0,214,320,cLINE);
- button(8,218,94,(specScr||mapScr)?"DASHBOARD":home?"NODES":detailView?"LIST":"NEXT",cTURQ,cOKBG);
+ button(8,218,94,(specScr||mapScr||chatScr)?"DASHBOARD":home?"NODES":detailView?"LIST":"NEXT",cTURQ,cOKBG);
  if(logging)button(113,218,94,String("STOP ")+String(written),cRED,cBADBG);else if(millis()<uiMsgUntil)button(113,218,94,uiMsg,cAMBER,cWARNBG);else button(113,218,94,"LOG",cTURQ,cOKBG);
- {const char* WL[]={"TIME 1m","TIME 10m","TIME 1h"};String r=specScr?String(WL[specWin]):mapScr?(mapZoom>1?String("ZOOM OUT"):mapPages>1?String("PAGE ")+String(mapPage+1)+"/"+String(mapPages):String("MAP")):home?String("CAL"):String("DASHBOARD");button(218,218,94,r,cTURQ,cOKBG);}}
+ {const char* WL[]={"TIME 1m","TIME 10m","TIME 1h"};unsigned cpg=max(1U,(chatTotal(chatCh)+3)/4);String r=chatScr?(cpg>1?String("OLDER ")+String(chatPage+1)+"/"+String(cpg):String("CHAT")):specScr?String(WL[specWin]):mapScr?(mapZoom>1?String("ZOOM OUT"):mapPages>1?String("PAGE ")+String(mapPage+1)+"/"+String(mapPages):String("MAP")):home?String("CAL"):String("DASHBOARD");button(218,218,94,r,cTURQ,cOKBG);}}
 void drawDetail(const Node& n){Quality q=quality(n);char id[16];snprintf(id,sizeof(id),"!%08lx",(unsigned long)n.id);
  panel(8,45,304,22);txt("NODE",16,52,1,cDIM,cPANEL);int idW=tft.textWidth(id,2);txt(fitName(n,304-idW-8-54),54,48,2,cWHITE,cPANEL);txt(id,304,48,2,cTURQ,cPANEL,TR_DATUM);
  drawGauge(n,q);drawSnr(n);drawHops(n);drawStats(n);drawChart(n);}
@@ -191,16 +213,17 @@ void drawHome(){const int X[]={6,109,212},Y[]={46,130};char b[48];uint32_t now=m
  {tile(X[2],Y[0],"RADIO",cAMBER,"NOISE >");mesh::Modem m;if(lora.has&&mesh::modem(lora,chans[0].name,m)){const char* pn=lora.usePreset?mesh::presetName(lora.preset):"MANUAL";txt(pn,X[2]+8,Y[0]+18,2,cWHITE,cPANEL);
    if(m.mhz>0){snprintf(b,sizeof b,"%.3f",m.mhz);txt(b,X[2]+8,Y[0]+36,2,cTURQ,cPANEL);txt("MHz",X[2]+8+tft.textWidth(b,2)+3,Y[0]+40,1,cDIM,cPANEL);}
    else txt(mesh::regionName(lora.region),X[2]+8,Y[0]+36,2,cTURQ,cPANEL);
-   snprintf(b,sizeof b,"SF%u BW%g",m.sf,(double)m.bwKhz);txt(b,X[2]+8,Y[0]+56,1,cDIM,cPANEL);txt(mesh::regionName(lora.region),X[2]+8,Y[0]+67,1,cDIM,cPANEL);}
+   snprintf(b,sizeof b,"SF%u BW%g kHz",m.sf,(double)m.bwKhz);txt(b,X[2]+8,Y[0]+56,1,cDIM,cPANEL);txt(mesh::regionName(lora.region),X[2]+8,Y[0]+67,1,cDIM,cPANEL);}
   else{txt("--",X[2]+8,Y[0]+20,4,cGREY,cPANEL);txt("no LoRa config",X[2]+8,Y[0]+56,1,cAMBER,cPANEL);}}
  // KANAL
  {tile(X[0],Y[1],"CHANNEL",cGREEN,"NOISE >");if(dev.has){uint16_t c=dev.chUtil>50?cRED:dev.chUtil>25?cAMBER:cGREEN;snprintf(b,sizeof b,"%.0f%%",dev.chUtil);txt(b,X[0]+8,Y[1]+20,4,c,cPANEL);snprintf(b,sizeof b,"Tx %.1f%%",dev.airTx);txt(b,X[0]+8,Y[1]+52,2,cWHITE,cPANEL);}
   else{txt("--",X[0]+8,Y[1]+20,4,cGREY,cPANEL);txt("no telemetry",X[0]+8,Y[1]+56,1,cAMBER,cPANEL);}
   if(chans[0].role==1||chans[0].name[0]){snprintf(b,sizeof b,"%.14s",chans[0].name[0]?chans[0].name:mesh::presetName(lora.preset));txt(b,X[0]+8,Y[1]+68,1,cDIM,cPANEL);}}
- // CZAT
- {tile(X[1],Y[1],"CHAT",cTURQ);snprintf(b,sizeof b,"%lu",(unsigned long)chatCount);txt(b,X[1]+90,Y[1]+6,1,cTURQ,cPANEL,TR_DATUM);
-  if(chatCount){snprintf(b,sizeof b,"%.15s",chatFrom);txt(b,X[1]+8,Y[1]+20,1,cWHITE,cPANEL);for(int i=0;i<4;i++){char l[17]={};size_t n=strlen(chatText);if(size_t(i)*15<n){strncpy(l,chatText+i*15,15);txt(l,X[1]+8,Y[1]+32+i*11,1,cDIM,cPANEL);}}}
-  else txt("no messages",X[1]+8,Y[1]+24,1,cDIM,cPANEL);}
+ // CZAT: lista kanalow z liczba nowych wiadomosci (dotkniecie wiersza otwiera czytnik)
+ {unsigned tot=0;for(unsigned c=0;c<9;c++)tot+=unreadN(c);tile(X[1],Y[1],"CHAT",cTURQ);if(tot){snprintf(b,sizeof b,"%u new",tot);txt(b,X[1]+92,Y[1]+6,1,cAMBER,cPANEL,TR_DATUM);}else if(chatCount){snprintf(b,sizeof b,"%lu",(unsigned long)chatCount);txt(b,X[1]+92,Y[1]+6,1,cDIM,cPANEL,TR_DATUM);}
+  unsigned o[9];unsigned n=chList(o);if(!n)txt("no channels",X[1]+8,Y[1]+24,1,cDIM,cPANEL);
+  for(unsigned i=0;i<n&&i<5;i++){unsigned u=unreadN(o[i]);char nm[24];strlcpy(nm,chName(o[i]).c_str(),sizeof nm);if(o[i]==8)snprintf(b,sizeof b,"DM");else snprintf(b,sizeof b,"%u %.8s",o[i],nm);
+   int yy=Y[1]+19+i*12;txt(b,X[1]+8,yy,1,u?cWHITE:cDIM,cPANEL);snprintf(b,sizeof b,"%u",u);txt(b,X[1]+92,yy,1,u?cAMBER:cGREY,cPANEL,TR_DATUM);}}
  // TRACKER
  {tile(X[2],Y[1],"DEVICE",cAMBER);if(myId){const char* nm=nullptr;for(auto &n:nodes)if(n.id==myId){if(n.name[0])nm=n.name;break;}
    if(nm){snprintf(b,sizeof b,"%.15s",nm);txt(b,X[2]+8,Y[1]+19,1,cWHITE,cPANEL);}
@@ -269,15 +292,30 @@ void drawSpec(bool force){static uint32_t key=0;uint32_t now=millis();const uint
  auto ym=[&](int v){return yb-(constrain(v,GAUGE_MIN,GAUGE_MAX)-GAUGE_MIN)*(yb-yt)/(GAUGE_MAX-GAUGE_MIN);};
  for(int v=-40;v>=-120;v-=20){int y=ym(v);for(int x=x0;x<=x1;x+=6)tft.drawPixel(x,y,cTRACK);snprintf(b,sizeof b,"%d",v);txt(b,32,y,1,cDIM,cPANEL,MR_DATUM);}
  for(unsigned i=0;i<specRing.used;i++){const spec::Sample& s=specRing.at(i);uint32_t age=now-s.t;if(age>win)continue;int x=x1-int(uint64_t(age)*w/win);
-  if(s.rssi!=spec::NONE)tft.fillRect(x-1,ym(s.rssi)-1,2,2,cAMBER);if(s.noise!=spec::NONE)tft.fillRect(x-1,ym(s.noise)-1,2,2,cTURQ);}
+  if(s.rssi!=spec::NONE)tft.fillRect(x-1,ym(s.rssi)-1,2,2,cAMBER);}
+ // szum: linia poziomu (10. percentyl), lamana przez kolejne odczyty i wyrazne kropki 3x3 nad kropkami RSSI
+ if(st.hasNoise){int yf=ym(st.floor);for(int x=x0;x<=x1;x+=4)tft.drawFastHLine(x,yf,2,cTURQ);snprintf(b,sizeof b,"floor %d",st.floor);txt(b,x0+3,yf<yb-10?yf+2:yf-10,1,cTURQ,cPANEL);
+  int lx=-1,ly=0;for(unsigned i=0;i<specRing.used;i++){const spec::Sample& s=specRing.at(i);if(now-s.t>win||s.noise==spec::NONE)continue;int x=x1-int(uint64_t(now-s.t)*w/win),y=ym(s.noise);if(lx>=0)tft.drawLine(lx,ly,x,y,cTURQ);lx=x;ly=y;}
+  for(unsigned i=0;i<specRing.used;i++){const spec::Sample& s=specRing.at(i);if(now-s.t>win||s.noise==spec::NONE)continue;tft.fillRect(x1-int(uint64_t(now-s.t)*w/win)-1,ym(s.noise)-1,3,3,cWHITE);}}
  if(!st.n)txt("Waiting for mesh packets...",(x0+x1)/2,(yt+yb)/2,2,cDIM,cPANEL,MC_DATUM);
+ else if(!st.hasNoise)txt("no noise estimate: signals too strong",(x0+x1)/2,(yt+yb)/2+14,1,cAMBER,cPANEL,MC_DATUM);
  tft.fillCircle(40,167,2,cTURQ);txt("noise (RSSI-SNR)",46,163,1,cDIM,cPANEL);tft.fillCircle(150,167,2,cAMBER);txt("signal",156,163,1,cDIM,cPANEL);txt(String("time ")+WN[specWin],306,163,1,cWHITE,cPANEL,TR_DATUM);
  txt("CHANNEL",8,185,1,cDIM,cPANEL);const int sy0=176,sh=18;unsigned cols=win/10000;
  for(unsigned a=0;a<cols&&a<utilRing.used;a++){float p=utilRing.pctAgo(a);int xr=x1-int(uint64_t(a)*w/cols),xl=x1-int(uint64_t(a+1)*w/cols);int h=p<=0?1:max(1,int(p*sh/100));uint16_t c=p>50?cRED:p>25?cAMBER:cGREEN;tft.fillRect(xl,sy0+sh-h,max(1,xr-xl),h,c);}
  snprintf(b,sizeof b,"-%s",WN[specWin]);txt(b,x0,197,1,cDIM,cPANEL);txt("now",x1,197,1,cDIM,cPANEL,TR_DATUM);}
-void draw(){bool alive=everFrame&&(millis()-lastFrame<90000);int screen=(detail&&selected>=0&&nodes[selected].count)?1:mapScr?4:specScr?3:home?2:0;
+// Okno czytania wiadomosci jednego kanalu: najnowsze u gory, 4 na strone, tekst zawijany do 2 wierszy po 50 znakow.
+void drawChat(){tft.fillRect(0,46,320,166,cBG);unsigned tot=chatTotal(chatCh),pages=max(1U,(tot+3)/4);if(chatPage>=pages)chatPage=pages-1;char b[64];
+ txt(chName(chatCh),8,47,2,cTURQ,cBG);snprintf(b,sizeof b,"%u msg  %u/%u",tot,chatPage+1,pages);txt(b,312,52,1,cDIM,cBG,TR_DATUM);tft.drawFastHLine(6,65,308,cLINE);
+ if(!tot)txt("no messages on this channel yet",8,90,2,cDIM,cBG);
+ unsigned seen=0,shown=0;for(int i=int(msgCnt)-1;i>=0&&shown<4;i--){const Msg& m=msgs[(msgHead+i)%MSGN];if(m.ch!=chatCh)continue;if(seen++<chatPage*4)continue;int y=68+int(shown++)*35;
+  char who[40]={};const Node* sn=nullptr;for(auto &n:nodes)if(n.id==m.from){sn=&n;break;}if(sn&&sn->name[0])mesh::displayName(sn->name,who,sizeof who);if(!who[0])snprintf(who,sizeof who,"!%08lx",(unsigned long)m.from);who[28]=0;
+  if(m.fresh)tft.fillCircle(4,y+4,2,cAMBER);txt(who,10,y,1,m.fresh?cAMBER:cTURQ,cBG);
+  uint32_t a=(millis()-m.at)/1000;if(a<60)snprintf(b,sizeof b,"%lus",(unsigned long)a);else if(a<3600)snprintf(b,sizeof b,"%lum",(unsigned long)(a/60));else snprintf(b,sizeof b,"%luh",(unsigned long)(a/3600));txt(b,312,y,1,cDIM,cBG,TR_DATUM);
+  char l1[52]={},l2[52]={};const char* t=m.text;size_t n=strlen(t),k=n;if(n>50){k=50;while(k>32&&t[k]!=' ')k--;if(t[k]!=' ')k=50;}memcpy(l1,t,k);const char* r=t+k;while(*r==' ')r++;size_t rn=strlen(r);if(rn>50){memcpy(l2,r,50);l2[48]='.';l2[49]='.';}else memcpy(l2,r,rn);
+  txt(l1,8,y+11,1,cWHITE,cBG);if(l2[0])txt(l2,8,y+21,1,cWHITE,cBG);}}
+void draw(){bool alive=everFrame&&(millis()-lastFrame<90000);int screen=(detail&&selected>=0&&nodes[selected].count)?1:mapScr?4:specScr?3:chatScr?5:home?2:0;
  bool changed=false;if(screen!=uiScreen){tft.fillScreen(cBG);uiScreen=screen;changed=true;}
- drawHeader(alive);drawGps();if(screen==1)drawDetail(nodes[selected]);else if(screen==2)drawHome();else if(screen==3)drawSpec(changed);else if(screen==4)drawMap(changed);else drawList();drawNav(screen==1);
+ drawHeader(alive);drawGps();if(screen==1)drawDetail(nodes[selected]);else if(screen==2)drawHome();else if(screen==3)drawSpec(changed);else if(screen==4)drawMap(changed);else if(screen==5)drawChat();else drawList();drawNav(screen==1);
  Serial.printf("baud=%lu rx=%lu frames=%lu ",(unsigned long)baudNow,(unsigned long)rxBytes,(unsigned long)frames);Serial.printf("API=%d nodes=%u csv=%lu frame_errors=%u parse_errors=%lu log_errors=%lu\n",configured,orderCount,(unsigned long)written,framing.errors,(unsigned long)parseErrors,(unsigned long)logErrors);
 }
 void setup(){Serial.begin(115200);pinMode(BACKLIGHT,OUTPUT);digitalWrite(BACKLIGHT,HIGH);pinMode(TOUCH_CS,OUTPUT);digitalWrite(TOUCH_CS,HIGH);pinMode(TOUCH_CLK,OUTPUT);digitalWrite(TOUCH_CLK,LOW);pinMode(TOUCH_MOSI,OUTPUT);pinMode(TOUCH_MISO,INPUT);pinMode(0,INPUT_PULLUP);
@@ -285,16 +323,17 @@ void setup(){Serial.begin(115200);pinMode(BACKLIGHT,OUTPUT);digitalWrite(BACKLIG
  sdReady=sdMount();if(!prefs.getBool("valid",false))calibrate();requestConfig();draw();}
 void loop(){if(Serial.available()){char cmd=Serial.read();if(cmd=='l')toggleLog();if(cmd=='c')calibrate();if(cmd=='t'){clockSeen(uint32_t(Serial.parseInt()));}if(cmd=='r'){configured=false;requestConfig();}}while(radio.available()){framing.feed(radio.read(),millis(),fromRadio);++rxBytes;}uint32_t now=millis();
  if(!everFrame){if(now-baudSince>8000)nextBaud(now);else if(now-lastRequest>3500)requestConfig();}
+ if(gpsAt&&now-gpsAt>12000){gpsAt=0;configured=false;}
  static bool baudSaved=false;if(configured&&!baudSaved){baudSaved=true;if(prefs.getULong("baud",0)!=baudNow)prefs.putULong("baud",baudNow);}if((!configured&&now-lastRequest>15000)||(everFrame&&now-lastFrame>90000&&now-lastRequest>90000)){configured=false;requestConfig();}
  if(configured&&now-lastHeartbeat>30000){const uint8_t hb[]={0x3a,0};sendFrame(hb,sizeof(hb));lastHeartbeat=now;}
- static bool pressed=false;static uint32_t pressedAt=0;int x,y;if(touch(x,y)){if(!pressed&&now-pressedAt>250){pressed=true;pressedAt=now;if(y<22){invertScr=!invertScr;prefs.putBool("inv",invertScr);tft.invertDisplay(invertScr);uiScreen=-1;}else if(y>=212){if(x<100){if(specScr||mapScr){specScr=false;mapScr=false;home=true;}else if(home)home=false;else if(detail)detail=false;else page=(page+1)%max(1U,(orderCount+4)/5);}else if(x<247)toggleLog();else if(specScr)specWin=(specWin+1)%3;else if(mapScr){if(mapZoom>1){mapZoom=1;mapCX=-1;uiScreen=-1;}else mapPage=(mapPage+1)%mapPages;}else if(home)calibrate();else{home=true;detail=false;}}else if(home&&!specScr&&y>=46&&y<208){int row=y<125?0:1,col=x<104?0:x<207?1:2;if((row==0&&col==2)||(row==1&&col==0)){specScr=true;home=false;}else if(row==0&&col==1){mapScr=true;home=false;mapSel=-1;mapSelId=0;mapPage=0;mapZoom=1;mapCX=-1;}}else if(mapScr&&y>=46&&y<212){mapBuild();int hit=-1;bool zbtn=false;
+ static bool pressed=false;static uint32_t pressedAt=0;int x,y;if(touch(x,y)){if(!pressed&&now-pressedAt>250){pressed=true;pressedAt=now;if(y<22&&configured&&x>=184&&x<252){gpsSet(x<217?1:0);}else if(y<22){invertScr=!invertScr;prefs.putBool("inv",invertScr);tft.invertDisplay(invertScr);uiScreen=-1;}else if(y>=212){if(x<100){if(specScr||mapScr||chatScr){leaveSub();}else if(home)home=false;else if(detail)detail=false;else page=(page+1)%max(1U,(orderCount+4)/5);}else if(x<247)toggleLog();else if(specScr)specWin=(specWin+1)%3;else if(chatScr){unsigned cp=max(1U,(chatTotal(chatCh)+3)/4);chatPage=(chatPage+1)%cp;}else if(mapScr){if(mapZoom>1){mapZoom=1;mapCX=-1;uiScreen=-1;}else mapPage=(mapPage+1)%mapPages;}else if(home)calibrate();else{home=true;detail=false;}}else if(home&&!specScr&&y>=46&&y<208){int row=y<125?0:1,col=x<104?0:x<207?1:2;if((row==0&&col==2)||(row==1&&col==0)){specScr=true;home=false;}else if(row==1&&col==1){chatTap(y);}else if(row==0&&col==1){mapScr=true;home=false;mapSel=-1;mapSelId=0;mapPage=0;mapZoom=1;mapCX=-1;}}else if(mapScr&&y>=46&&y<212){mapBuild();int hit=-1;bool zbtn=false;
   if(y>=190&&x>=6&&x<62){if(mapZoom>1&&x<34){mapRecentre();mapZoom=zoomStep(-1);if(mapZoom==1)mapCX=-1;zbtn=true;}else if(x>=(mapZoom>1?34:6)&&mapZoom<MAP_ZOOM_MAX){if(mapCX<0)mapCenter(mapCX,mapCY);if(mapZoom>1)mapRecentre();mapZoom=zoomStep(1);if(mapWaw())mapWawSnap();zbtn=true;}if(zbtn)uiScreen=-1;}
   // kursory: krzyzak w prawym dolnym rogu przesuwa widok o 60 pikseli ekranu (tylko po powiekszeniu)
   if(!zbtn&&mapZoom>1&&x>=250&&y>=152&&y<204){int col=(x-250)/22,dx=0,dy=0;if(y<169){if(col==1)dy=-1;}else if(y<187){if(col==0)dx=-1;else if(col==2)dx=1;}else if(col==1)dy=1;if(dx||dy){mapRecentre();mapCX+=dx*60.f/mapZoom;mapCY+=dy*60.f/mapZoom;zbtn=true;}}
   if(!zbtn){int vx,vy;mapView(vx,vy);if(mapZoom>1||x<168){int best=14*14;for(unsigned i=0;i<mapCount;i++){int dx=x-(6+int((mapList[i].fx-vx/float(mapU()))*mapZoom)),dy=y-(46+int((mapList[i].fy-vy/float(mapU()))*mapZoom)),d=dx*dx+dy*dy;if(d<best){best=d;hit=i;}}}else if(y>=62){unsigned r=(y-62)/16;unsigned e=mapPage*9+r;if(r<9&&e<mapCount)hit=e;}
-  if(hit>=0){if(hit==mapSel&&nodes[mapList[hit].idx].count){selected=mapList[hit].idx;detail=true;mapScr=false;home=false;probeStart(nodes[selected].id);}else{mapSel=hit;mapSelId=nodes[mapList[hit].idx].id;mapPage=hit/9;}}else{mapSel=-1;mapSelId=0;if(mapZoom>1){mapCX=vx/float(mapU())+(x-6)/float(mapZoom);mapCY=vy/float(mapU())+(y-46)/float(mapZoom);}}}}else if(specScr&&y>=78&&y<208){specWin=(specWin+1)%3;}else if(!home&&!specScr&&!detail&&y>=70&&y<207){unsigned row=(y-70)/27;if(row<5&&page*5+row<orderCount){selected=order[page*5+row];detail=true;probeStart(nodes[selected].id);}}else if(detail&&x<164&&y>=70&&y<151){probe.on=!probe.on;if(probe.on)probe.nextAt=now;}lastDraw=0;}}else pressed=false;
+  if(hit>=0){if(hit==mapSel&&nodes[mapList[hit].idx].count){selected=mapList[hit].idx;detail=true;mapScr=false;home=false;probeStart(nodes[selected].id);}else{mapSel=hit;mapSelId=nodes[mapList[hit].idx].id;mapPage=hit/9;}}else{mapSel=-1;mapSelId=0;if(mapZoom>1){mapCX=vx/float(mapU())+(x-6)/float(mapZoom);mapCY=vy/float(mapU())+(y-46)/float(mapZoom);}}}}else if(chatScr&&y>=46&&y<212){unsigned cp=max(1U,(chatTotal(chatCh)+3)/4);chatPage=y<130?(chatPage?chatPage-1:cp-1):(chatPage+1)%cp;}else if(specScr&&y>=78&&y<208){specWin=(specWin+1)%3;}else if(!home&&!specScr&&!detail&&y>=70&&y<207){unsigned row=(y-70)/27;if(row<5&&page*5+row<orderCount){selected=order[page*5+row];detail=true;probeStart(nodes[selected].id);}}else if(detail&&x<164&&y>=70&&y<151){probe.on=!probe.on;if(probe.on)probe.nextAt=now;}lastDraw=0;}}else pressed=false;
  // BOOT short press changes page; long press starts/stops logging (useful without touch).
- static uint32_t bootAt=0;static bool bootHeld=false;if(!digitalRead(0)){if(!bootHeld){bootHeld=true;bootAt=now;}}else if(bootHeld){bootHeld=false;if(now-bootAt>1000)toggleLog();else if(specScr||mapScr){specScr=false;mapScr=false;home=true;}else if(home)home=false;else{detail=false;page=(page+1)%max(1U,(orderCount+4)/5);}lastDraw=0;}
+ static uint32_t bootAt=0;static bool bootHeld=false;if(!digitalRead(0)){if(!bootHeld){bootHeld=true;bootAt=now;}}else if(bootHeld){bootHeld=false;if(now-bootAt>1000)toggleLog();else if(specScr||mapScr||chatScr){leaveSub();}else if(home)home=false;else{detail=false;page=(page+1)%max(1U,(orderCount+4)/5);}lastDraw=0;}
  if(logging&&now-lastFlush>2000){csv.flush();lastFlush=now;if(csv.getWriteError()){++logErrors;logging=false;csv.close();flash("SD ERROR");}}
  probeTick(now);if(dev.has&&now-utilAt>=10000){utilAt=now;utilRing.add(dev.chUtil);}
  if(!lastDraw||dirty||now-lastDraw>=(detail?500u:1000u)){dirty=false;draw();lastDraw=now;}delay(2);}

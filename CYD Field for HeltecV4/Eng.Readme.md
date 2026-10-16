@@ -107,7 +107,9 @@ and the XPT2046 is bit-banged (MISO39/MOSI32/CLK25/CS33).
 ## Dashboard (start screen)
 Six tiles with the node status, based on data from the Tracker over UART: BATTERY (% and voltage, USB = external power),
 NODES (heard / active in 15 min / known), RADIO (preset, centre frequency, SF and BW), CHANNEL (channel utilization, Tx airtime, channel name),
-CHAT (last received text message and counter), DEVICE (full node name and ID, uptime, baud, frames).
+CHAT (channel list with the number of new messages, see below), DEVICE (full node name and ID, uptime, baud, frames).
+
+**Chat.** The CHAT tile lists the channels configured on the node (index, name, unread count; DM = messages sent directly to the node) and the total of new messages in its corner. Tapping a channel row opens a reader with that channel's messages: newest first, 4 per page, new ones marked with an amber dot, with sender and time since reception. The right button (OLDER) or tapping the lower/upper half of the screen pages through them, tapping the tile header opens the channel with the newest message, DASHBOARD goes back. Messages are kept in RAM only (last 40, lost on restart), text is cut to 100 characters, and Polish letters are shown without diacritics.
 Keys: NODES ↔ DASHBOARD (left), LOG (middle; on the dashboard it records all traffic), DASHBOARD / CAL (right; on the dashboard it is the touch calibration).
 Battery and channel utilization appear after the Tracker's first telemetry (usually within several minutes; the interval is set in the Telemetry module).
 The frequency is calculated for the US, EU433, EU868 and ANZ regions; for other regions the region name is shown.
@@ -143,7 +145,7 @@ This is an indicative map, not a navigation one.
 ## Spectrum and noise ("NOISE" screen)
 Entry: touch the RADIO or CHANNEL tile on the dashboard. The right key (or touching the chart) changes the time range (TIME 1m / 10m / 1h), the left key returns to the dashboard.
 Meshtastic does not expose a radio measurement, so the screen shows **estimates from received packets**, not a true spectrum of the band:
-- NOISE = RSSI − SNR of the received packet (dBm); FLOOR = 10th percentile of noise in the window; chart: turquoise = noise, amber = signal RSSI.
+- NOISE = RSSI − SNR of the received packet (dBm); FLOOR = 10th percentile of noise in the window; chart: turquoise = noise (dashed line = FLOOR, white dots = readings), amber = signal RSSI. Noise can be estimated only from weaker packets: with a very strong signal (e.g. a node next to the device, RSSI around −45 dBm) SNR saturates, RSSI − SNR becomes unrealistic and is discarded (the NOISE and FLOOR tiles show "--" and the chart shows a hint).
 - PKT/MIN = packets received in the last 60 s; CH UTIL and AIR TX = channel utilization and airtime from the Tracker's telemetry, and the "CHANNEL" bar is its history (one sample every 10 s).
 - With no traffic on the network there are no packets, so there is no noise value either. CH UTIL and AIR TX refresh only as often as the Tracker sends telemetry.
 - A true spectrum (frequency scan, noise measurement in silence) needs access to the SX1262 chip, i.e. custom firmware instead of Meshtastic or an additional radio module.
@@ -182,6 +184,8 @@ Coordinates are not taken from the remote sender's message. Before going into th
 that the Tracker has a current GPS position (position_source=2) and that gps_age_s is reasonable.
 When the GPS stops delivering updates, the last position is kept and its age grows.
 The CACHE label means a position read during the initial database dump, of uncertain freshness.
+
+**GPS buttons.** In the header, to the left of the API field, there is a satellite icon with ON and OFF buttons. The filled button shows the GPS mode reported by the node (Config.position.gps_mode). Tapping sends a local configuration change to the node (the other position settings are kept unchanged). The node saves it and restarts, and after several seconds the CYD reads its data again. The GPS bar then shows "GPS is switched OFF". The buttons work only after the link is up (API OK) and the position configuration has been read.
 
 ## Measurement limits
 

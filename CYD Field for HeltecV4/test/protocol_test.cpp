@@ -25,6 +25,15 @@ int main(){
   assert(D("",5)==""&&D(nullptr)=="");
   char z[1]={'x'};assert(mesh::displayName("a",z,0)==0&&z[0]=='x');}
  Bytes b;fixed(b,1,0x12345678);fixed(b,6,123);fixed(b,7,1700000000);float snr=-7.25;uint32_t bits;memcpy(&bits,&snr,4);fixed(b,8,bits);vfield(b,12,uint64_t(int64_t(-115)));vfield(b,15,3);vfield(b,9,2);vfield(b,21,1);mesh::Packet p;assert(mesh::packet(b.data(),b.size(),p));assert(p.from==0x12345678&&p.rssi==-115&&p.snr==-7.25&&p.hopStart-p.hopLimit==1&&p.transport==1);
+ {Bytes c;fixed(c,1,7);vfield(c,3,5);mesh::Packet q;assert(mesh::packet(c.data(),c.size(),q)&&q.channel==5);Bytes d0;fixed(d0,1,7);assert(mesh::packet(d0.data(),d0.size(),q)&&q.channel==0);}
+ { // konfiguracja GPS: odczyt trybu, przepisanie pozostalych pol, podmiana gps_mode, ToRadio.packet do admina
+  Bytes pos;vfield(pos,1,120);vfield(pos,2,1);vfield(pos,4,1);vfield(pos,7,811);vfield(pos,13,1);Bytes pc;nested(pc,2,pos);mesh::PosCfg g;assert(mesh::posConfig(pc.data(),pc.size(),g)&&g.has&&g.mode==1);
+  Bytes legacy;vfield(legacy,4,1);Bytes lc;nested(lc,2,legacy);mesh::PosCfg lg;assert(mesh::posConfig(lc.data(),lc.size(),lg)&&lg.mode==1);Bytes off;vfield(off,1,60);Bytes oc;nested(oc,2,off);assert(mesh::posConfig(oc.data(),oc.size(),lg)&&lg.mode==0);
+  uint8_t out[200];size_t n=mesh::buildGpsMode(out,sizeof out,0x1234abcd,77,g,0);assert(n>0);mesh::Packet pk;assert(mesh::packet(out+2,n-2,pk)&&pk.to==0x1234abcd&&pk.port==6&&pk.id==77);
+  mesh::Reader a1(pk.payload,pk.payloadSize);mesh::Field f;bool seen=false;while(a1.next(f))if(f.tag==34&&f.wire==2){seen=true;mesh::Reader c1(f.bytes,f.size);mesh::Field h;while(c1.next(h))if(h.tag==2){mesh::Reader p1(h.bytes,h.size);mesh::Field q;std::vector<unsigned> tags;unsigned mode=99,secs=0,fl=0;while(p1.next(q)){tags.push_back(q.tag);if(q.tag==13)mode=q.value;if(q.tag==1)secs=q.value;if(q.tag==7)fl=q.value;}
+   assert(mode==0&&secs==120&&fl==811&&tags.size()==4);for(unsigned t:tags)assert(t!=4);}}assert(seen);
+  assert(mesh::buildGpsMode(out,sizeof out,0,77,g,0)==0&&mesh::buildGpsMode(out,sizeof out,5,77,mesh::PosCfg{},0)==0&&mesh::buildGpsMode(out,sizeof out,5,77,g,3)==0);
+  Bytes big(120,0x80);Bytes bc;nested(bc,2,big);mesh::PosCfg bg;assert(!mesh::posConfig(bc.data(),bc.size(),bg));}
  Bytes zero;vfield(zero,12,0);assert(mesh::packet(zero.data(),zero.size(),p)&&p.hasRssi&&p.rssi==0);Bytes none;assert(mesh::packet(none.data(),0,p)&&!p.hasRssi);
  Bytes pos;fixed(pos,1,uint32_t(-330000000));fixed(pos,2,210000000);fixed(pos,4,1700000000);mesh::Position q;assert(mesh::position(pos.data(),pos.size(),q)&&q.valid()&&q.lat==-330000000&&q.lon==210000000);Bytes partial;fixed(partial,1,0);assert(mesh::position(partial.data(),partial.size(),q)&&!q.valid());Bytes origin;fixed(origin,1,0);fixed(origin,2,0);assert(mesh::position(origin.data(),origin.size(),q)&&q.valid());
  uint8_t bad[]={0x12,0x80};mesh::Reader r(bad,2);mesh::Field f;assert(!r.next(f)&&!r.ok());uint8_t overflow[]={0x08,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x02};mesh::Reader ov(overflow,sizeof overflow);assert(!ov.next(f)&&!ov.ok());

@@ -52,9 +52,9 @@ inline Civil civilLocal(uint32_t utc){uint32_t t=utc+uint32_t(warsawOffset(utc))
 inline size_t fileSafe(const char* in,char* out,size_t cap){if(!cap)return 0;size_t o=0;bool us=true;for(size_t i=0;in&&in[i]&&o+1<cap;i++){char c=in[i];bool ok=(c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='.'||c=='!';if(ok){out[o++]=c;us=false;}else if(!us){out[o++]='_';us=true;}}while(o&&(out[o-1]=='_'||out[o-1]=='.'))o--;out[o]=0;return o;}
 struct Position { int32_t lat=0,lon=0;uint32_t epoch=0;uint8_t source=0;bool hasLat=false,hasLon=false; bool valid()const{return hasLat&&hasLon&&lat>=-900000000&&lat<=900000000&&lon>=-1800000000&&lon<=1800000000;} };
 inline bool position(const uint8_t* b,size_t len,Position& out){Position p;Reader r(b,len);Field f;while(r.next(f)){if(f.tag==1&&f.wire==5){p.lat=int32_t(f.value);p.hasLat=true;}if(f.tag==2&&f.wire==5){p.lon=int32_t(f.value);p.hasLon=true;}if(f.tag==4&&f.wire==5)p.epoch=f.value;if(f.tag==5&&f.wire==0)p.source=f.value;if(f.tag==7&&f.wire==5&&f.value)p.epoch=f.value;}if(!r.ok())return false;out=p;return true;}
-struct Packet {uint32_t from=0,to=0,id=0,requestId=0,epoch=0;int32_t rssi=0;float snr=0;unsigned hopStart=0,hopLimit=0,relay=0,port=0,transport=0;bool hasRssi=false,hasSnr=false,hasHopStart=false,mqtt=false;const uint8_t* payload=nullptr;size_t payloadSize=0;};
+struct Packet {uint32_t from=0,to=0,id=0,requestId=0,epoch=0;int32_t rssi=0;float snr=0;unsigned hopStart=0,hopLimit=0,relay=0,port=0,transport=0,channel=0;bool hasRssi=false,hasSnr=false,hasHopStart=false,mqtt=false;const uint8_t* payload=nullptr;size_t payloadSize=0;};
 inline bool packet(const uint8_t* b,size_t len,Packet& out){Packet p;Reader r(b,len);Field f;while(r.next(f)){
- if(f.tag==1&&f.wire==5)p.from=f.value;if(f.tag==2&&f.wire==5)p.to=f.value;if(f.tag==6&&f.wire==5)p.id=f.value;if(f.tag==7&&f.wire==5)p.epoch=f.value;
+ if(f.tag==1&&f.wire==5)p.from=f.value;if(f.tag==2&&f.wire==5)p.to=f.value;if(f.tag==3&&f.wire==0)p.channel=unsigned(f.value);if(f.tag==6&&f.wire==5)p.id=f.value;if(f.tag==7&&f.wire==5)p.epoch=f.value;
  if(f.tag==8&&f.wire==5){p.snr=asFloat(f.value);p.hasSnr=true;}if(f.tag==12&&f.wire==0){p.rssi=int32_t(f.value);p.hasRssi=true;}
  if(f.tag==9&&f.wire==0)p.hopLimit=f.value;if(f.tag==15&&f.wire==0){p.hopStart=f.value;p.hasHopStart=true;}
  if(f.tag==14&&f.wire==0)p.mqtt=f.value;if(f.tag==19&&f.wire==0)p.relay=f.value;if(f.tag==21&&f.wire==0)p.transport=f.value;
@@ -95,6 +95,28 @@ inline bool loraConfig(const uint8_t* b,size_t len,LoraCfg& out){Reader r(b,len)
  if(!r.ok()||!found)return false;LoraCfg c;Reader q(l,ll);while(q.next(f)){if(f.tag==1&&f.wire==0)c.usePreset=f.value!=0;if(f.tag==2&&f.wire==0)c.preset=unsigned(f.value);if(f.tag==3&&f.wire==0)c.bw=unsigned(f.value);
   if(f.tag==4&&f.wire==0)c.sf=unsigned(f.value);if(f.tag==6&&f.wire==5)c.freqOffset=asFloat(f.value);if(f.tag==7&&f.wire==0)c.region=unsigned(f.value);if(f.tag==11&&f.wire==0)c.channelNum=unsigned(f.value);if(f.tag==14&&f.wire==5)c.overrideFreq=asFloat(f.value);}
  if(!q.ok())return false;c.has=true;out=c;return true;}
+// ---- Sterowanie GPS Trackera: Config.position (FromRadio.config, pole 2) i AdminMessage.set_config (34) ----
+// PositionConfig: gps_enabled=4 (przestarzale), gps_mode=13 (0 DISABLED, 1 ENABLED, 2 NOT_PRESENT). set_config zastepuje cala sekcje,
+// wiec surowe bajty PositionConfig sa zachowane i odsylane z podmienionym gps_mode. Lokalny admin (z klienta UART) nie wymaga session_passkey.
+struct PosCfg{bool has=false;unsigned mode=0;size_t len=0;uint8_t raw[100]={};};
+inline bool posConfig(const uint8_t* b,size_t len,PosCfg& out){Reader r(b,len);Field f;const uint8_t* p=nullptr;size_t pl=0;bool found=false;
+ while(r.next(f))if(f.tag==2&&f.wire==2){p=f.bytes;pl=f.size;found=true;}
+ if(!r.ok()||!found||pl>sizeof out.raw)return false;PosCfg c;Reader q(p,pl);bool has13=false;unsigned legacy=0;
+ while(q.next(f)){if(f.tag==13&&f.wire==0){c.mode=unsigned(f.value);has13=true;}if(f.tag==4&&f.wire==0)legacy=f.value?1:0;}
+ if(!q.ok())return false;if(!has13)c.mode=legacy;memcpy(c.raw,p,pl);c.len=pl;c.has=true;out=c;return true;}
+inline size_t putVar(uint8_t* o,uint64_t v){size_t n=0;do{o[n++]=(v&127)|(v>127?128:0);v>>=7;}while(v);return n;}
+// ToRadio{packet=MeshPacket{to=wlasny wezel,decoded=Data{portnum=6 ADMIN_APP,payload=AdminMessage{set_config{position{...,gps_mode}}}},id,want_ack}}.
+// Pola PositionConfig poza 4 i 13 sa przepisane bez zmian (tylko varinty; inny typ = blad). Zwraca dlugosc lub 0.
+inline size_t buildGpsMode(uint8_t* out,size_t cap,uint32_t to,uint32_t id,const PosCfg& pc,unsigned mode){
+ if(cap<200||!to||!id||!pc.has||mode>2)return 0;uint8_t pos[120];size_t pn=0;Reader r(pc.raw,pc.len);Field f;
+ while(r.next(f)){if(f.tag==4||f.tag==13)continue;if(f.wire!=0)return 0;pn+=putVar(pos+pn,uint64_t(f.tag)<<3);pn+=putVar(pos+pn,f.value);}
+ if(!r.ok())return 0;pos[pn++]=0x68;pos[pn++]=uint8_t(mode);
+ uint8_t cfg[130];size_t cn=0;cfg[cn++]=0x12;cn+=putVar(cfg+cn,pn);memcpy(cfg+cn,pos,pn);cn+=pn;
+ uint8_t adm[140];size_t an=0;adm[an++]=0x92;adm[an++]=0x02;an+=putVar(adm+an,cn);memcpy(adm+an,cfg,cn);an+=cn;
+ uint8_t d[150];size_t dn=0;d[dn++]=0x08;d[dn++]=6;d[dn++]=0x12;dn+=putVar(d+dn,an);memcpy(d+dn,adm,an);dn+=an;
+ uint8_t m[170];size_t n=0;m[n++]=0x15;for(unsigned i=0;i<4;i++)m[n++]=uint8_t(to>>(8*i));
+ m[n++]=0x22;n+=putVar(m+n,dn);memcpy(m+n,d,dn);n+=dn;m[n++]=0x35;for(unsigned i=0;i<4;i++)m[n++]=uint8_t(id>>(8*i));m[n++]=0x50;m[n++]=1;
+ size_t k=0;out[k++]=0x0a;k+=putVar(out+k,n);memcpy(out+k,m,n);return k+n;}
 inline const char* presetName(unsigned p){static const char* n[]={"LongFast","LongSlow","VLongSlow","MediumSlow","MediumFast","ShortSlow","ShortFast","LongMod","ShortTurbo"};return p<9?n[p]:"?";}
 inline const char* regionName(unsigned r){static const char* n[]={"UNSET","US","EU433","EU868","CN","JP","ANZ","KR","TW","RU","IN","NZ865","TH","LORA24","UA433","UA868","MY433","MY919","SG923"};return r<19?n[r]:"?";}
 // Parametry modemu (SF, BW w kHz) i czestotliwosc srodkowa kanalu w MHz. Czestotliwosc tylko dla regionow US, EU433, EU868, ANZ
