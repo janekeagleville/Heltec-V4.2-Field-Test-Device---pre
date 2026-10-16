@@ -207,6 +207,11 @@ GPIO4 (złącze J3, pin 15), UART TX	IO35
 GPIO6 (złącze J3, pin 17), UART RX	IO27
 GND (złącze J3, pin 1)	GND
 
+GPIO4	J3, pin 15	UART TX	IO35	P3 (RX)
+GPIO6	J3, pin 17	UART RX	IO27	CN1 (TX)
+GND	J3, pin 1	Masa wspólna	GND	dowolny GND<img width="457" height="46" alt="image" src="https://github.com/user-attachments/assets/d0dd3496-a665-4529-b3bd-bfe8b5f34ad1" />
+
+
 Komenda do ustawienia modułu Serial:
 meshtastic --set serial.enabled true --set serial.mode PROTO --set serial.rxd 6 --set serial.txd 4 --set serial.baud BAUD_115200
 
